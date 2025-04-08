@@ -7,33 +7,39 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { createReport, createUser, getRecentReports, getUserByEmail } from '@/utils/db/actions'
 import dynamic from 'next/dynamic'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import { motion } from 'framer-motion'
 
-// Fix for default marker icons
-if (typeof window !== 'undefined') {
-  delete (L.Icon.Default.prototype as any)._getIconUrl
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png'
-  })
-}
-
-// Dynamic imports with SSR disabled
+// Dynamic imports with SSR disabled for all Leaflet components
 const MapContainer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.MapContainer),
-  { ssr: false }
+  () => import('react-leaflet').then((mod) => {
+    // Fix for default marker icons - only runs on client side
+    if (typeof window !== 'undefined') {
+      const L = require('leaflet')
+      delete (L.Icon.Default.prototype as any)._getIconUrl
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png'
+      })
+    }
+    return mod.MapContainer
+  }),
+  { 
+    ssr: false,
+    loading: () => <div className="h-96 bg-gray-100 rounded-lg flex items-center justify-center">Loading map...</div>
+  }
 )
+
 const TileLayer = dynamic(
   () => import('react-leaflet').then((mod) => mod.TileLayer),
   { ssr: false }
 )
+
 const Marker = dynamic(
   () => import('react-leaflet').then((mod) => mod.Marker),
   { ssr: false }
 )
+
 const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
   { ssr: false }
@@ -54,6 +60,7 @@ interface Report {
 }
 
 export default function ReportPage() {
+  const [isClient, setIsClient] = useState(false)
   const [user, setUser] = useState<{ id: number; email: string; name: string } | null>(null)
   const router = useRouter()
   const [reports, setReports] = useState<Report[]>([])
@@ -69,8 +76,12 @@ export default function ReportPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [mapCenter, setMapCenter] = useState<[number, number]>([22.5726, 88.3639]) // Default to Kolkata
-  const mapRef = useRef<L.Map | null>(null)
-  const markerRef = useRef<L.Marker | null>(null)
+  const mapRef = useRef<any>(null)
+  const markerRef = useRef<any>(null)
+
+  useEffect(() => {
+    setIsClient(true) // Mark that we're on the client side
+  }, [])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -104,7 +115,7 @@ export default function ReportPage() {
     setVerificationStatus('verifying');
     
     try {
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY!);
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   
       const base64Data = await readFileAsBase64(file);
@@ -131,9 +142,9 @@ export default function ReportPage() {
         // Clean the response (remove markdown formatting if present)
         let cleanedResponse = text.trim();
         if (cleanedResponse.startsWith('```json')) {
-          cleanedResponse = cleanedResponse.slice(7, -3).trim(); // Remove ```json and ```
+          cleanedResponse = cleanedResponse.slice(7, -3).trim();
         } else if (cleanedResponse.startsWith('```')) {
-          cleanedResponse = cleanedResponse.slice(3, -3).trim(); // Remove ```
+          cleanedResponse = cleanedResponse.slice(3, -3).trim();
         }
   
         const parsedResult = JSON.parse(cleanedResponse);
@@ -200,7 +211,6 @@ export default function ReportPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate required fields
     if (!newReport.location) {
       toast.error('Please select a location by dragging the marker on the map');
       return;
@@ -272,6 +282,14 @@ export default function ReportPage() {
     }
     checkUser()
   }, [router])
+
+  if (!isClient) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-white to-emerald-50 p-4 md:p-8 flex items-center justify-center">
+        <Loader className="animate-spin h-8 w-8 text-emerald-600" />
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white to-emerald-50 p-4 md:p-8">
@@ -450,54 +468,52 @@ export default function ReportPage() {
                     Location (Drag marker to exact spot)
                   </label>
                   <div className="h-96 rounded-lg overflow-hidden border border-gray-300 relative z-0">
-                    {typeof window !== 'undefined' && (
-                      <MapContainer 
-                        center={mapCenter}
-                        zoom={13}
-                        style={{ height: "100%", width: "100%" }}
-                        whenCreated={(map) => {
-                          mapRef.current = map
-                          map.on('dragstart', () => {
+                    <MapContainer 
+                      center={mapCenter}
+                      zoom={13}
+                      style={{ height: "100%", width: "100%" }}
+                      whenCreated={(map) => {
+                        mapRef.current = map
+                        map.on('dragstart', () => {
+                          if (markerRef.current) {
+                            markerRef.current.setOpacity(0.6)
+                          }
+                        })
+                      }}
+                    >
+                      <TileLayer
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                      />
+                      <Marker 
+                        position={mapCenter}
+                        draggable={true}
+                        ref={(ref) => {
+                          if (ref) {
+                            markerRef.current = ref
+                          }
+                        }}
+                        eventHandlers={{
+                          dragstart: () => {
                             if (markerRef.current) {
                               markerRef.current.setOpacity(0.6)
                             }
-                          })
+                          },
+                          dragend: (e) => {
+                            const marker = e.target
+                            const position = marker.getLatLng()
+                            marker.setOpacity(1)
+                            setMapCenter([position.lat, position.lng])
+                            setNewReport(prev => ({
+                              ...prev,
+                              location: `${position.lat.toFixed(4)}, ${position.lng.toFixed(4)}`
+                            }))
+                          }
                         }}
                       >
-                        <TileLayer
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                        />
-                        <Marker 
-                          position={mapCenter}
-                          draggable={true}
-                          ref={(ref) => {
-                            if (ref) {
-                              markerRef.current = ref
-                            }
-                          }}
-                          eventHandlers={{
-                            dragstart: () => {
-                              if (markerRef.current) {
-                                markerRef.current.setOpacity(0.6)
-                              }
-                            },
-                            dragend: (e) => {
-                              const marker = e.target
-                              const position = marker.getLatLng()
-                              marker.setOpacity(1)
-                              setMapCenter([position.lat, position.lng])
-                              setNewReport(prev => ({
-                                ...prev,
-                                location: `${position.lat.toFixed(4)}, ${position.lng.toFixed(4)}`
-                              }))
-                            }
-                          }}
-                        >
-                          <Popup>Drag me to the exact waste location</Popup>
-                        </Marker>
-                      </MapContainer>
-                    )}
+                        <Popup>Drag me to the exact waste location</Popup>
+                      </Marker>
+                    </MapContainer>
                   </div>
                   <div className="mt-2 text-sm text-gray-600">
                     {newReport.location ? (
