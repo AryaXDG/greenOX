@@ -35,12 +35,6 @@ const privateKeyProvider = new EthereumPrivateKeyProvider({
   config: { chainConfig },
 });
 
-const web3auth = new Web3Auth({
-  clientId,
-  web3AuthNetwork: WEB3AUTH_NETWORK.TESTNET, // Changed from SAPPHIRE_MAINNET to TESTNET
-  privateKeyProvider,
-});
-
 interface HeaderProps {
   onMenuClick: () => void;
   totalEarnings: number;
@@ -56,30 +50,31 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
   const isMobile = useMediaQuery("(max-width: 768px)")
   const [balance, setBalance] = useState(0)
 
-  console.log('user info', userInfo);
-  
   useEffect(() => {
     const init = async () => {
       try {
-        await web3auth.initModal();
-        setProvider(web3auth.provider);
+        const web3authInstance = new Web3Auth({
+          clientId,
+          web3AuthNetwork: WEB3AUTH_NETWORK.TESTNET,
+          privateKeyProvider,
+        });
 
-        if (web3auth.connected) {
+        await web3authInstance.initModal();
+        setProvider(web3authInstance.provider);
+
+        if (web3authInstance.connected) {
           setLoggedIn(true);
-          const user = await web3auth.getUserInfo();
+          const user = await web3authInstance.getUserInfo();
           setUserInfo(user);
           if (user.email) {
-            localStorage.setItem('userEmail', user.email);
-            try {
-              await createUser(user.email, user.name || 'Anonymous User');
-            } catch (error) {
-              console.error("Error creating user:", error);
-              // Handle the error appropriately, maybe show a message to the user
-            }
+            localStorage.setItem("userEmail", user.email);
+            await createUser(user.email, user.name || "Anonymous User");
           }
         }
+
+        (window as any).web3auth = web3authInstance;
       } catch (error) {
-        console.error("Error initializing Web3Auth:", error);
+        console.error("Web3Auth init error:", error);
       } finally {
         setLoading(false);
       }
@@ -100,10 +95,7 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
     };
 
     fetchNotifications();
-
-    // Set up periodic checking for new notifications
-    const notificationInterval = setInterval(fetchNotifications, 30000); // Check every 30 seconds
-
+    const notificationInterval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(notificationInterval);
   }, [userInfo]);
 
@@ -119,86 +111,68 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
     };
 
     fetchUserBalance();
-
-    // Add an event listener for balance updates
     const handleBalanceUpdate = (event: CustomEvent) => {
       setBalance(event.detail);
     };
 
     window.addEventListener('balanceUpdated', handleBalanceUpdate as EventListener);
-
     return () => {
       window.removeEventListener('balanceUpdated', handleBalanceUpdate as EventListener);
     };
   }, [userInfo]);
 
   const login = async () => {
-    if (!web3auth) {
-      console.log("web3auth not initialized yet");
-      return;
-    }
+    const web3authInstance = (window as any).web3auth;
+    if (!web3authInstance) return;
+
     try {
-      const web3authProvider = await web3auth.connect();
+      const web3authProvider = await web3authInstance.connect();
       setProvider(web3authProvider);
       setLoggedIn(true);
-      const user = await web3auth.getUserInfo();
+      const user = await web3authInstance.getUserInfo();
       setUserInfo(user);
       if (user.email) {
         localStorage.setItem('userEmail', user.email);
-        try {
-          await createUser(user.email, user.name || 'Anonymous User');
-        } catch (error) {
-          console.error("Error creating user:", error);
-          // Handle the error appropriately, maybe show a message to the user
-        }
+        await createUser(user.email, user.name || 'Anonymous User');
       }
-    } catch (error) {
-      console.error("Error during login:", error);
+    } catch (err) {
+      console.error("Login error:", err);
     }
   };
 
   const logout = async () => {
-    if (!web3auth) {
-      console.log("web3auth not initialized yet");
-      return;
-    }
+    const web3authInstance = (window as any).web3auth;
+    if (!web3authInstance) return;
+
     try {
-      await web3auth.logout();
+      await web3authInstance.logout();
       setProvider(null);
       setLoggedIn(false);
       setUserInfo(null);
-      localStorage.removeItem('userEmail');
-    } catch (error) {
-      console.error("Error during logout:", error);
+      localStorage.removeItem("userEmail");
+    } catch (err) {
+      console.error("Logout error:", err);
     }
   };
 
   const getUserInfo = async () => {
-    if (web3auth.connected) {
-      const user = await web3auth.getUserInfo();
+    const web3authInstance = (window as any).web3auth;
+    if (web3authInstance?.connected) {
+      const user = await web3authInstance.getUserInfo();
       setUserInfo(user);
       if (user.email) {
         localStorage.setItem('userEmail', user.email);
-        try {
-          await createUser(user.email, user.name || 'Anonymous User');
-        } catch (error) {
-          console.error("Error creating user:", error);
-          // Handle the error appropriately, maybe show a message to the user
-        }
+        await createUser(user.email, user.name || 'Anonymous User');
       }
     }
   };
 
   const handleNotificationClick = async (notificationId: number) => {
     await markNotificationAsRead(notificationId);
-    setNotifications(prevNotifications => 
-      prevNotifications.filter(notification => notification.id !== notificationId)
-    );
+    setNotifications(prev => prev.filter(n => n.id !== notificationId));
   };
 
-  if (loading) {
-    return <div>Loading Web3Auth...</div>;
-  }
+  if (loading) return <div>Loading Web3Auth...</div>;
 
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -211,7 +185,6 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
             <Leaf className="h-6 w-6 md:h-8 md:w-8 text-green-500 mr-1 md:mr-2" />
             <div className="flex flex-col">
               <span className="font-bold text-base md:text-lg text-gray-800">GreenOx</span>
-              {/* <span className="text-[8px] md:text-[10px] text-gray-500 -mt-1">ETHOnline24</span> */}
             </div>
           </Link>
         </div>
