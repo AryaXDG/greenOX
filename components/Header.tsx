@@ -18,7 +18,7 @@ import { EthereumPrivateKeyProvider } from "@web3auth/ethereum-provider"
 import { useMediaQuery } from "@/hooks/useMediaQuery"
 import { createUser, getUnreadNotifications, markNotificationAsRead, getUserByEmail, getUserBalance } from "@/utils/db/actions"
 
-const clientId = "BAg5SeUF5_78JBR2wXZogBX3uQi77ENl5cVeeLpfwDrg7EN3FkXBcefOAUWnW7BP5VSo9L8JkknVw_WIY5XN4F4";
+const clientId = "BJKdDFkNtkWX87XqkuWrDu4rbkSvWyQZ5lswS0ucINxxcN0inRVW8zzKAywPPzgiOHP7_3PcfFwfpvcQvSdaLRs";
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -33,6 +33,12 @@ const chainConfig = {
 
 const privateKeyProvider = new EthereumPrivateKeyProvider({
   config: { chainConfig },
+});
+
+const web3auth = new Web3Auth({
+  clientId,
+  web3AuthNetwork: WEB3AUTH_NETWORK.TESTNET, // Changed from SAPPHIRE_MAINNET to TESTNET
+  privateKeyProvider,
 });
 
 interface HeaderProps {
@@ -50,31 +56,30 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
   const isMobile = useMediaQuery("(max-width: 768px)")
   const [balance, setBalance] = useState(0)
 
+  console.log('user info', userInfo);
+  
   useEffect(() => {
     const init = async () => {
       try {
-        const web3authInstance = new Web3Auth({
-          clientId,
-          web3AuthNetwork: WEB3AUTH_NETWORK.TESTNET,
-          privateKeyProvider,
-        });
+        await web3auth.initModal();
+        setProvider(web3auth.provider);
 
-        await web3authInstance.initModal();
-        setProvider(web3authInstance.provider);
-
-        if (web3authInstance.connected) {
+        if (web3auth.connected) {
           setLoggedIn(true);
-          const user = await web3authInstance.getUserInfo();
+          const user = await web3auth.getUserInfo();
           setUserInfo(user);
           if (user.email) {
-            localStorage.setItem("userEmail", user.email);
-            await createUser(user.email, user.name || "Anonymous User");
+            localStorage.setItem('userEmail', user.email);
+            try {
+              await createUser(user.email, user.name || 'Anonymous User');
+            } catch (error) {
+              console.error("Error creating user:", error);
+              // Handle the error appropriately, maybe show a message to the user
+            }
           }
         }
-
-        (window as any).web3auth = web3authInstance;
       } catch (error) {
-        console.error("Web3Auth init error:", error);
+        console.error("Error initializing Web3Auth:", error);
       } finally {
         setLoading(false);
       }
@@ -95,7 +100,10 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
     };
 
     fetchNotifications();
-    const notificationInterval = setInterval(fetchNotifications, 30000);
+
+    // Set up periodic checking for new notifications
+    const notificationInterval = setInterval(fetchNotifications, 30000); // Check every 30 seconds
+
     return () => clearInterval(notificationInterval);
   }, [userInfo]);
 
@@ -111,68 +119,86 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
     };
 
     fetchUserBalance();
+
+    // Add an event listener for balance updates
     const handleBalanceUpdate = (event: CustomEvent) => {
       setBalance(event.detail);
     };
 
     window.addEventListener('balanceUpdated', handleBalanceUpdate as EventListener);
+
     return () => {
       window.removeEventListener('balanceUpdated', handleBalanceUpdate as EventListener);
     };
   }, [userInfo]);
 
   const login = async () => {
-    const web3authInstance = (window as any).web3auth;
-    if (!web3authInstance) return;
-
+    if (!web3auth) {
+      console.log("web3auth not initialized yet");
+      return;
+    }
     try {
-      const web3authProvider = await web3authInstance.connect();
+      const web3authProvider = await web3auth.connect();
       setProvider(web3authProvider);
       setLoggedIn(true);
-      const user = await web3authInstance.getUserInfo();
+      const user = await web3auth.getUserInfo();
       setUserInfo(user);
       if (user.email) {
         localStorage.setItem('userEmail', user.email);
-        await createUser(user.email, user.name || 'Anonymous User');
+        try {
+          await createUser(user.email, user.name || 'Anonymous User');
+        } catch (error) {
+          console.error("Error creating user:", error);
+          // Handle the error appropriately, maybe show a message to the user
+        }
       }
-    } catch (err) {
-      console.error("Login error:", err);
+    } catch (error) {
+      console.error("Error during login:", error);
     }
   };
 
   const logout = async () => {
-    const web3authInstance = (window as any).web3auth;
-    if (!web3authInstance) return;
-
+    if (!web3auth) {
+      console.log("web3auth not initialized yet");
+      return;
+    }
     try {
-      await web3authInstance.logout();
+      await web3auth.logout();
       setProvider(null);
       setLoggedIn(false);
       setUserInfo(null);
-      localStorage.removeItem("userEmail");
-    } catch (err) {
-      console.error("Logout error:", err);
+      localStorage.removeItem('userEmail');
+    } catch (error) {
+      console.error("Error during logout:", error);
     }
   };
 
   const getUserInfo = async () => {
-    const web3authInstance = (window as any).web3auth;
-    if (web3authInstance?.connected) {
-      const user = await web3authInstance.getUserInfo();
+    if (web3auth.connected) {
+      const user = await web3auth.getUserInfo();
       setUserInfo(user);
       if (user.email) {
         localStorage.setItem('userEmail', user.email);
-        await createUser(user.email, user.name || 'Anonymous User');
+        try {
+          await createUser(user.email, user.name || 'Anonymous User');
+        } catch (error) {
+          console.error("Error creating user:", error);
+          // Handle the error appropriately, maybe show a message to the user
+        }
       }
     }
   };
 
   const handleNotificationClick = async (notificationId: number) => {
     await markNotificationAsRead(notificationId);
-    setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    setNotifications(prevNotifications => 
+      prevNotifications.filter(notification => notification.id !== notificationId)
+    );
   };
 
-  if (loading) return <div>Loading Web3Auth...</div>;
+  if (loading) {
+    return <div>Loading Web3Auth...</div>;
+  }
 
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -185,6 +211,7 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
             <Leaf className="h-6 w-6 md:h-8 md:w-8 text-green-500 mr-1 md:mr-2" />
             <div className="flex flex-col">
               <span className="font-bold text-base md:text-lg text-gray-800">GreenOx</span>
+              {/* <span className="text-[8px] md:text-[10px] text-gray-500 -mt-1">ETHOnline24</span> */}
             </div>
           </Link>
         </div>
